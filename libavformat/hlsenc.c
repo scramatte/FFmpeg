@@ -21,6 +21,7 @@
 
 #include "config.h"
 #include <float.h>
+#include <time.h>
 #include <stdint.h>
 #if HAVE_UNISTD_H
 #include <unistd.h>
@@ -32,6 +33,9 @@
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/log.h"
+#include "libavutil/time.h"
+#include "libavutil/time_internal.h"
+#include "libavutil/timestamp.h"
 
 #include "avformat.h"
 #include "internal.h"
@@ -78,6 +82,7 @@ typedef struct HLSContext {
     int  wrap;             // Set by a private option.
     uint32_t flags;        // enum HLSFlags
     char *segment_filename;
+    int use_strftime;
 
     int allowcache;
     int64_t recording_time;
@@ -479,11 +484,24 @@ static int hls_start(AVFormatContext *s)
             av_strlcpy(vtt_oc->filename, c->vtt_basename,
                   sizeof(vtt_oc->filename));
     } else {
-        if (av_get_frame_filename(oc->filename, sizeof(oc->filename),
+
+	if (c->use_strftime) {
+	        time_t now0;
+        	struct tm *tm, tmpbuf;
+        	time(&now0);
+        	tm = localtime_r(&now0, &tmpbuf);
+        
+		if (!strftime(oc->filename, sizeof(oc->filename), c->basename, tm)) {
+            		av_log(oc, AV_LOG_ERROR, "Could not get segment filename with strftime\n");
+            		return AVERROR(EINVAL);
+        	}
+
+        } else if (av_get_frame_filename(oc->filename, sizeof(oc->filename),
                                   c->basename, c->wrap ? c->sequence % c->wrap : c->sequence) < 0) {
             av_log(oc, AV_LOG_ERROR, "Invalid segment filename template '%s'\n", c->basename);
             return AVERROR(EINVAL);
         }
+
         if( c->vtt_basename) {
             if (av_get_frame_filename(vtt_oc->filename, sizeof(vtt_oc->filename),
                               c->vtt_basename, c->wrap ? c->sequence % c->wrap : c->sequence) < 0) {
@@ -817,6 +835,7 @@ static const AVOption options[] = {
     {"round_durations", "round durations in m3u8 to whole numbers", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_ROUND_DURATIONS }, 0, UINT_MAX,   E, "flags"},
     {"discont_start", "start the playlist with a discontinuity tag", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_DISCONT_START }, 0, UINT_MAX,   E, "flags"},
     {"omit_endlist", "Do not append an endlist when ending stream", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_OMIT_ENDLIST }, 0, UINT_MAX,   E, "flags"},
+    {"strftime", "set filename expansion with strftime at segment creation", OFFSET(use_strftime), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, 1, E },
 
     { NULL },
 };
